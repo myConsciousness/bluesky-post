@@ -15,7 +15,7 @@ This action is implemented in the Dart language and uses [bluesky](https://githu
 Configure your workflow to use `myConsciousness/bluesky-post@v1`,
 and provide the post you want to send as the `text` input.
 
-Provide Bluesky's ATP server with `handle` and `password` to create a session.
+Provide Bluesky's PDS server with `handle` and `password` to create a session.
 
 For example:
 
