@@ -7,8 +7,8 @@ jobs:
   post:
     runs-on: ubuntu-latest
     steps:
-      - uses: myConsciousness/bluesky-post@v0.1
+      - uses: myConsciousness/bluesky-post@v2
         with:
           text: "Test post from Github Actions powered by 'myConsciousness/bluesky-post'."
-          handle: ${{ secrets.BLUESKY_HANDLE }}
+          identifier: ${{ secrets.BLUESKY_IDENTIFIER }}
           password: ${{ secrets.BLUESKY_PASSWORD }}
