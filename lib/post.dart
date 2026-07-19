@@ -1,216 +1,167 @@
-// Copyright 2023 Shinya Kato. All rights reserved.
+// Copyright 2026 Shinya Kato. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided the conditions.
 
 // 🎯 Dart imports:
 import 'dart:async';
-import 'dart:io';
 
 // 📦 Package imports:
 import 'package:actions_toolkit_dart/core.dart' as core;
+import 'package:atproto_core/atproto_core.dart' as xrpc;
+import 'package:bluesky/app_bsky_feed_post.dart' as bsky;
+import 'package:bluesky/app_bsky_richtext_facet.dart' as bsky;
+import 'package:bluesky/atproto.dart' as atp;
 import 'package:bluesky/bluesky.dart' as bsky;
-import 'package:bluesky/cardyb.dart' as cardyb;
+import 'package:bluesky/com_atproto_label_defs.dart' as bsky;
 import 'package:bluesky_text/bluesky_text.dart';
-import 'package:http/http.dart' as http;
+
+// 🌎 Project imports:
+import 'src/embed.dart';
+import 'src/inputs.dart';
 
 const _linkConfig = LinkConfig(
   excludeProtocol: true,
   enableShortening: true,
 );
 
+/// Entry point for the action: create a Bluesky post from the workflow inputs.
+///
+/// Any failure is surfaced through [core.setFailed] so the action exits with a
+/// non-zero status instead of silently succeeding.
 Future<void> post() async {
-  final bluesky = await _bluesky;
+  try {
+    await _run();
+  } catch (e) {
+    core.setFailed(message: 'Failed to create the Bluesky post: $e');
+  }
+}
+
+Future<void> _run() async {
+  final service = resolveService(core.getInput(name: 'service'));
+
+  final retry = parseRetryCount(core.getInput(name: 'retry-count'));
+  if (retry.warning != null) {
+    core.warning(message: retry.warning!);
+  }
+  final retryConfig = xrpc.RetryConfig(maxAttempts: retry.value);
+
+  final bluesky = await _createClient(service, retryConfig);
 
   final text = BlueskyText(
-    core.getInput(
-      name: 'text',
-      options: core.InputOptions(required: true),
-    ),
+    core.getInput(name: 'text', options: core.InputOptions(required: true)),
     linkConfig: _linkConfig,
   ).format();
+  final facets = await text.entities.toFacets(service: service);
 
-  final facets = await text.entities.toFacets(service: _service);
+  final reply = await _resolveReply(bluesky);
+  final embed = await _resolveEmbed(bluesky);
 
-  final createdPost = await bluesky.feeds.createPost(
+  final created = await bluesky.feed.post.create(
     text: text.value,
-    facets: facets.map(bsky.Facet.fromJson).toList(),
-    embed: await _getEmbed(bluesky),
-    languageTags: _langs,
+    facets: facets.map(bsky.RichtextFacet.fromJson).toList(),
+    reply: reply,
+    embed: embed,
+    langs: parseCsvOrNull(core.getInput(name: 'langs')),
     labels: _labels,
-    tags: _tags,
+    tags: parseCsvOrNull(core.getInput(name: 'tags')),
   );
 
   core.info(message: 'Sent a post successfully!');
-  core.info(message: 'cid = [${createdPost.data.cid}]');
-  core.info(message: 'uri = [${createdPost.data.uri}]');
+  core.info(message: 'cid = [${created.data.cid}]');
+  core.info(message: 'uri = [${created.data.uri}]');
+
+  core.setOutput(name: 'uri', value: created.data.uri.toString());
+  core.setOutput(name: 'cid', value: created.data.cid);
 }
 
-Future<bsky.Embed?> _getEmbed(final bsky.Bluesky bluesky) async {
-  try {
-    final uploadedMedia = await _uploadMedia(bluesky);
-    if (uploadedMedia != null) {
-      return bsky.Embed.images(
-        data: bsky.EmbedImages(
-          images: [
-            bsky.Image(
-              alt: core.getInput(
-                name: 'media-alt',
-                options: core.InputOptions(trimWhitespace: true),
-              ),
-              image: uploadedMedia.blob,
-            )
-          ],
-        ),
-      );
-    }
-
-    final preview = await cardyb.findLinkPreview(Uri.parse(core.getInput(
-      name: 'link-preview-url',
-      options: core.InputOptions(trimWhitespace: true),
-    )));
-
-    final uploadedPreview = await _uploadLinkPreview(
-      bluesky,
-      preview.data.image,
-    );
-
-    return bsky.Embed.external(
-      data: bsky.EmbedExternal(
-        external: bsky.EmbedExternalThumbnail(
-          uri: preview.data.url,
-          title: preview.data.title,
-          description: preview.data.description,
-          blob: uploadedPreview?.blob,
-        ),
-      ),
-    );
-  } catch (_) {
-    return null;
-  }
-}
-
-Future<bsky.Session> _getSession(
+Future<bsky.Bluesky> _createClient(
   final String service,
-  final bsky.RetryConfig retryConfig,
+  final xrpc.RetryConfig retryConfig,
 ) async {
-  final session = await bsky.createSession(
+  final session = await atp.createSession(
     service: service,
     identifier: core.getInput(
       name: 'identifier',
-      options: core.InputOptions(
-        required: true,
-        trimWhitespace: true,
-      ),
+      options: core.InputOptions(required: true, trimWhitespace: true),
     ),
     password: core.getInput(
       name: 'password',
-      options: core.InputOptions(
-        required: true,
-        trimWhitespace: true,
-      ),
+      options: core.InputOptions(required: true, trimWhitespace: true),
     ),
     retryConfig: retryConfig,
   );
 
-  return session.data;
-}
-
-Future<bsky.Bluesky> get _bluesky async {
-  final service = _service;
-  final retryCount = core.getInput(name: 'retry-count');
-
-  final retryConfig = bsky.RetryConfig(
-    maxAttempts: retryCount.isEmpty ? 5 : int.parse(retryCount),
-  );
-
   return bsky.Bluesky.fromSession(
-    await _getSession(service, retryConfig),
+    session.data,
     service: service,
     retryConfig: retryConfig,
   );
 }
 
-String get _service {
-  final service = core.getInput(
-    name: 'service',
+Future<bsky.ReplyRef?> _resolveReply(final bsky.Bluesky bluesky) async {
+  final replyTo = core.getInput(
+    name: 'reply-to',
     options: core.InputOptions(trimWhitespace: true),
   );
 
-  return service.isEmpty ? 'bsky.social' : service;
-}
-
-Future<bsky.BlobData?> _uploadMedia(final bsky.Bluesky bluesky) async {
-  final mediaPath = core.getInput(
-    name: 'media',
-    options: core.InputOptions(trimWhitespace: true),
-  );
-
-  if (mediaPath.isEmpty) {
+  if (replyTo.isEmpty) {
     return null;
   }
 
-  final uploaded = await bluesky.repositories.uploadBlob(
-    File(mediaPath).readAsBytesSync(),
-  );
-
-  return uploaded.data;
+  return resolveReplyRef(bluesky, replyTo);
 }
 
-Future<bsky.BlobData?> _uploadLinkPreview(
-  final bsky.Bluesky bluesky,
-  final String previewImage,
-) async {
-  if (previewImage.isEmpty) {
-    return null;
+Future<bsky.UFeedPostEmbed?> _resolveEmbed(final bsky.Bluesky bluesky) async {
+  return buildEmbed(
+    bluesky,
+    imagePaths: _imagePaths(),
+    imageAlts: parseCsvPositional(
+      core.getInput(name: 'media-alt', options: core.InputOptions()),
+    ),
+    videoPath: core.getInput(
+      name: 'video',
+      options: core.InputOptions(trimWhitespace: true),
+    ),
+    videoAlt: core.getInput(
+      name: 'video-alt',
+      options: core.InputOptions(trimWhitespace: true),
+    ),
+    linkPreviewUrl: core.getInput(
+      name: 'link-preview-url',
+      options: core.InputOptions(trimWhitespace: true),
+    ),
+    quoteUri: core.getInput(
+      name: 'quote',
+      options: core.InputOptions(trimWhitespace: true),
+    ),
+  );
+}
+
+/// Reads the image paths, capping at [maxImages] with a warning when exceeded.
+List<String> _imagePaths() {
+  final paths = parseCsv(core.getInput(name: 'media'));
+
+  if (paths.length > maxImages) {
+    core.warning(
+      message: 'Bluesky supports at most $maxImages images; '
+          'ignoring ${paths.length - maxImages} extra file(s).',
+    );
+    return paths.sublist(0, maxImages);
   }
 
-  final image = await http.get(Uri.parse(previewImage));
-  if (image.statusCode != 200) return null;
-
-  final uploaded = await bluesky.repositories.uploadBlob(image.bodyBytes);
-
-  return uploaded.data;
+  return paths;
 }
 
-List<String>? get _langs {
-  final langs = core.getInput(
-    name: 'langs',
-    options: core.InputOptions(trimWhitespace: true),
-  );
-
-  if (langs.isEmpty) {
-    return null;
-  }
-
-  return langs.split(',');
-}
-
-bsky.Labels? get _labels {
-  final labels = core.getInput(
-    name: 'labels',
-    options: core.InputOptions(trimWhitespace: true),
-  );
+bsky.UFeedPostLabels? get _labels {
+  final labels = parseCsv(core.getInput(name: 'labels'));
 
   if (labels.isEmpty) {
     return null;
   }
 
-  return bsky.Labels.selfLabels(
+  return bsky.UFeedPostLabels.selfLabels(
     data: bsky.SelfLabels(
-      values: labels.split(',').map((e) => bsky.SelfLabel(value: e)).toList(),
+      values: labels.map((final e) => bsky.SelfLabel(val: e)).toList(),
     ),
   );
-}
-
-List<String>? get _tags {
-  final tags = core.getInput(
-    name: 'tags',
-    options: core.InputOptions(trimWhitespace: true),
-  );
-
-  if (tags.isEmpty) {
-    return null;
-  }
-
-  return tags.split(',');
 }

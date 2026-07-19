@@ -1,14 +1,14 @@
 name: bluesky_post
-description: A server app using the shelf package and Docker.
-version: 5.0.0
+description: A GitHub Action to post to Bluesky Social, packaged as a Dart Docker container.
+version: 6.0.0
 publish_to: none
 environment:
-  sdk: ^3.0.0
+  sdk: ^3.3.0
 
 dependencies:
   actions_toolkit_dart: ^0.5.1
-  bluesky: ^0.10.4
-  bluesky_text: ^0.6.2
+  bluesky: ^2.1.0
+  bluesky_text: ^1.5.0
   http: ^1.1.0
 
 dev_dependencies:

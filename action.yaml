@@ -5,11 +5,27 @@ inputs:
   text:
     description: Text to be posted to Bluesky.
   media:
-    description: File path of the media to be attached to the Post.
+    description: >
+      File paths of the images to attach to the Post, in CSV format.
+      Up to 4 images are supported; any extras are ignored.
   media-alt:
-    description: Alt Text to be assigned to uploaded Media.
+    description: >
+      Alt text for the attached images, in CSV format.
+      Each entry aligns by index with `media`; missing entries default to empty.
+  video:
+    description: File path of a single video to attach to the Post.
+  video-alt:
+    description: Alt text to assign to the attached video.
   link-preview-url:
     description: URL for link preview.
+  reply-to:
+    description: >
+      AT-URI of the post to reply to.
+      For example, "at://did:plc:xxxx/app.bsky.feed.post/yyyy".
+  quote:
+    description: >
+      AT-URI of the post to quote.
+      For example, "at://did:plc:xxxx/app.bsky.feed.post/yyyy".
   langs:
     description: A collection of well-formed BCP47 language tags in CSV format.
   labels:
@@ -33,6 +49,12 @@ inputs:
     description: >
       Specify the number of retry on server error or network error.
       If omitted, it will always be "5".
+
+outputs:
+  uri:
+    description: The AT-URI of the created post.
+  cid:
+    description: The CID of the created post.
 
 runs:
   using: "docker"
