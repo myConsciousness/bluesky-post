@@ -8,8 +8,11 @@ import 'dart:async';
 // 📦 Package imports:
 import 'package:actions_toolkit_dart/core.dart' as core;
 import 'package:atproto_core/atproto_core.dart' as xrpc;
+import 'package:bluesky/app_bsky_feed_post.dart' as bsky;
+import 'package:bluesky/app_bsky_richtext_facet.dart' as bsky;
 import 'package:bluesky/atproto.dart' as atp;
 import 'package:bluesky/bluesky.dart' as bsky;
+import 'package:bluesky/com_atproto_label_defs.dart' as bsky;
 import 'package:bluesky_text/bluesky_text.dart';
 
 // 🌎 Project imports:
@@ -53,12 +56,12 @@ Future<void> _run() async {
   final reply = await _resolveReply(bluesky);
   final embed = await _resolveEmbed(bluesky);
 
-  final created = await bluesky.feed.post(
+  final created = await bluesky.feed.post.create(
     text: text.value,
-    facets: facets.map(bsky.Facet.fromJson).toList(),
+    facets: facets.map(bsky.RichtextFacet.fromJson).toList(),
     reply: reply,
     embed: embed,
-    languageTags: parseCsvOrNull(core.getInput(name: 'langs')),
+    langs: parseCsvOrNull(core.getInput(name: 'langs')),
     labels: _labels,
     tags: parseCsvOrNull(core.getInput(name: 'tags')),
   );
@@ -108,12 +111,10 @@ Future<bsky.ReplyRef?> _resolveReply(final bsky.Bluesky bluesky) async {
   return resolveReplyRef(bluesky, replyTo);
 }
 
-Future<bsky.Embed?> _resolveEmbed(final bsky.Bluesky bluesky) async {
-  final imagePaths = _imagePaths();
-
+Future<bsky.UFeedPostEmbed?> _resolveEmbed(final bsky.Bluesky bluesky) async {
   return buildEmbed(
     bluesky,
-    imagePaths: imagePaths,
+    imagePaths: _imagePaths(),
     imageAlts: parseCsvPositional(
       core.getInput(name: 'media-alt', options: core.InputOptions()),
     ),
@@ -151,16 +152,16 @@ List<String> _imagePaths() {
   return paths;
 }
 
-atp.Labels? get _labels {
+bsky.UFeedPostLabels? get _labels {
   final labels = parseCsv(core.getInput(name: 'labels'));
 
   if (labels.isEmpty) {
     return null;
   }
 
-  return atp.Labels.selfLabels(
-    data: atp.SelfLabels(
-      values: labels.map((final e) => atp.SelfLabel(value: e)).toList(),
+  return bsky.UFeedPostLabels.selfLabels(
+    data: bsky.SelfLabels(
+      values: labels.map((final e) => bsky.SelfLabel(val: e)).toList(),
     ),
   );
 }

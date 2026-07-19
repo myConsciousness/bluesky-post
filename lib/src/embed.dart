@@ -10,10 +10,17 @@ import 'dart:typed_data';
 // 📦 Package imports:
 import 'package:actions_toolkit_dart/core.dart' as actions;
 import 'package:atproto_core/atproto_core.dart' as xrpc;
+import 'package:bluesky/app_bsky_embed_external.dart' as bsky;
+import 'package:bluesky/app_bsky_embed_images.dart' as bsky;
+import 'package:bluesky/app_bsky_embed_record.dart' as bsky;
+import 'package:bluesky/app_bsky_embed_recordwithmedia.dart' as bsky;
 import 'package:bluesky/app_bsky_embed_video.dart' as bsky;
-import 'package:bluesky/atproto.dart' as atp;
+import 'package:bluesky/app_bsky_feed_defs.dart' as bsky hide ReplyRef;
+import 'package:bluesky/app_bsky_feed_post.dart' as bsky;
+import 'package:bluesky/app_bsky_video_defs.dart' as bsky;
 import 'package:bluesky/bluesky.dart' as bsky;
 import 'package:bluesky/cardyb.dart' as cardyb;
+import 'package:bluesky/com_atproto_repo_strongref.dart' as bsky;
 import 'package:http/http.dart' as http;
 
 // 🌎 Project imports:
@@ -29,12 +36,12 @@ const _videoPollInterval = Duration(seconds: 3);
 ///
 /// Throws a [FormatException] when the post cannot be found so the action
 /// fails loudly instead of silently dropping the quote/reply.
-Future<atp.StrongRef> resolveStrongRef(
+Future<bsky.RepoStrongRef> resolveStrongRef(
   final bsky.Bluesky bluesky,
   final String uri,
 ) async {
   final post = await _findPost(bluesky, uri);
-  return atp.StrongRef(cid: post.cid, uri: post.uri);
+  return bsky.RepoStrongRef(uri: post.uri, cid: post.cid);
 }
 
 /// Resolves the [bsky.ReplyRef] for a reply to the post at [uri].
@@ -46,10 +53,26 @@ Future<bsky.ReplyRef> resolveReplyRef(
   final String uri,
 ) async {
   final parent = await _findPost(bluesky, uri);
-  final parentRef = atp.StrongRef(cid: parent.cid, uri: parent.uri);
-  final root = parent.record.reply?.root ?? parentRef;
+  final parentRef = bsky.RepoStrongRef(uri: parent.uri, cid: parent.cid);
+  final root = _rootRefFromRecord(parent.record) ?? parentRef;
 
   return bsky.ReplyRef(root: root, parent: parentRef);
+}
+
+/// Extracts the thread root strong reference from a post record map, when the
+/// post is itself a reply. Returns `null` for a top-level post.
+bsky.RepoStrongRef? _rootRefFromRecord(final Map<String, dynamic> record) {
+  final reply = record['reply'];
+  if (reply is! Map) return null;
+
+  final root = reply['root'];
+  if (root is! Map) return null;
+
+  final uri = root['uri'];
+  final cid = root['cid'];
+  if (uri is! String || cid is! String) return null;
+
+  return bsky.RepoStrongRef(uri: xrpc.AtUri.parse(uri), cid: cid);
 }
 
 /// Builds the single embed to attach to the post, following the documented
@@ -57,7 +80,7 @@ Future<bsky.ReplyRef> resolveReplyRef(
 ///
 /// Media/quote failures propagate (fail loud). Only a link-preview failure is
 /// downgraded to a warning, and the post continues without a preview.
-Future<bsky.Embed?> buildEmbed(
+Future<bsky.UFeedPostEmbed?> buildEmbed(
   final bsky.Bluesky bluesky, {
   required final List<String> imagePaths,
   required final List<String> imageAlts,
@@ -78,12 +101,12 @@ Future<bsky.Embed?> buildEmbed(
       return null;
 
     case EmbedKind.images:
-      return bsky.Embed.images(
+      return bsky.UFeedPostEmbed.embedImages(
         data: await _buildImages(bluesky, imagePaths, imageAlts),
       );
 
     case EmbedKind.video:
-      return bsky.Embed.video(
+      return bsky.UFeedPostEmbed.embedVideo(
         data: await _buildVideo(bluesky, videoPath, videoAlt),
       );
 
@@ -91,15 +114,17 @@ Future<bsky.Embed?> buildEmbed(
       return _buildExternal(bluesky, linkPreviewUrl);
 
     case EmbedKind.record:
-      return bsky.Embed.record(
-        data: bsky.EmbedRecord(ref: await resolveStrongRef(bluesky, quoteUri)),
+      return bsky.UFeedPostEmbed.embedRecord(
+        data: bsky.EmbedRecord(
+          record: await resolveStrongRef(bluesky, quoteUri),
+        ),
       );
 
     case EmbedKind.recordWithMedia:
-      return bsky.Embed.recordWithMedia(
+      return bsky.UFeedPostEmbed.embedRecordWithMedia(
         data: bsky.EmbedRecordWithMedia(
           record: bsky.EmbedRecord(
-            ref: await resolveStrongRef(bluesky, quoteUri),
+            record: await resolveStrongRef(bluesky, quoteUri),
           ),
           media: await _buildMedia(
             bluesky,
@@ -115,7 +140,7 @@ Future<bsky.Embed?> buildEmbed(
 
 /// Builds the media half of a record-with-media embed, preferring images over
 /// video to match the embed priority.
-Future<bsky.EmbedMedia> _buildMedia(
+Future<bsky.UEmbedRecordWithMediaMedia> _buildMedia(
   final bsky.Bluesky bluesky, {
   required final List<String> imagePaths,
   required final List<String> imageAlts,
@@ -123,12 +148,12 @@ Future<bsky.EmbedMedia> _buildMedia(
   required final String videoAlt,
 }) async {
   if (imagePaths.isNotEmpty) {
-    return bsky.EmbedMedia.images(
+    return bsky.UEmbedRecordWithMediaMedia.embedImages(
       data: await _buildImages(bluesky, imagePaths, imageAlts),
     );
   }
 
-  return bsky.EmbedMedia.video(
+  return bsky.UEmbedRecordWithMediaMedia.embedVideo(
     data: await _buildVideo(bluesky, videoPath, videoAlt),
   );
 }
@@ -138,11 +163,11 @@ Future<bsky.EmbedImages> _buildImages(
   final List<String> paths,
   final List<String> alts,
 ) async {
-  final images = <bsky.Image>[];
+  final images = <bsky.EmbedImagesImage>[];
 
   for (var i = 0; i < paths.length; i++) {
     final blob = await _uploadBlob(bluesky, paths[i], label: 'image');
-    images.add(bsky.Image(alt: altAt(alts, i), image: blob));
+    images.add(bsky.EmbedImagesImage(image: blob, alt: altAt(alts, i)));
   }
 
   return bsky.EmbedImages(images: images);
@@ -161,24 +186,24 @@ Future<bsky.EmbedVideo> _buildVideo(
   );
 }
 
-Future<bsky.Embed?> _buildExternal(
+Future<bsky.UFeedPostEmbed?> _buildExternal(
   final bsky.Bluesky bluesky,
   final String url,
 ) async {
   try {
-    final preview = await cardyb.findLinkPreview(Uri.parse(url));
+    final preview = await cardyb.getLinkPreview(Uri.parse(url));
     final thumbnail = await _uploadLinkPreviewThumbnail(
       bluesky,
-      preview.data.image,
+      preview.data.image ?? '',
     );
 
-    return bsky.Embed.external(
+    return bsky.UFeedPostEmbed.embedExternal(
       data: bsky.EmbedExternal(
-        external: bsky.EmbedExternalThumbnail(
-          uri: preview.data.url,
-          title: preview.data.title,
-          description: preview.data.description,
-          blob: thumbnail,
+        external: bsky.EmbedExternalExternal(
+          uri: preview.data.url ?? url,
+          title: preview.data.title ?? '',
+          description: preview.data.description ?? '',
+          thumb: thumbnail,
         ),
       ),
     );
@@ -198,7 +223,7 @@ Future<xrpc.Blob> _uploadBlob(
   required final String label,
 }) async {
   final bytes = await _readFile(path, label: label);
-  final uploaded = await bluesky.atproto.repo.uploadBlob(bytes);
+  final uploaded = await bluesky.atproto.repo.uploadBlob(bytes: bytes);
 
   return uploaded.data.blob;
 }
@@ -210,7 +235,7 @@ Future<xrpc.Blob> _uploadVideo(
 ) async {
   final bytes = await _readFile(path, label: 'video');
 
-  final job = await bluesky.video.uploadVideo(bytes);
+  final job = await bluesky.video.uploadVideo(bytes: bytes);
   var status = job.data;
   if (status.blob != null) {
     return status.blob!;
@@ -218,9 +243,10 @@ Future<xrpc.Blob> _uploadVideo(
 
   final deadline = DateTime.now().add(_videoJobTimeout);
   while (status.blob == null) {
-    if (status.error != null || status.state.toUpperCase().contains('FAILED')) {
+    if (status.error != null ||
+        status.state.knownValue == bsky.KnownJobStatusState.jOB_STATE_FAILED) {
       throw StateError(
-        'Video processing failed (state: ${status.state}): '
+        'Video processing failed: '
         '${status.error ?? status.message ?? 'unknown error'}',
       );
     }
@@ -254,7 +280,8 @@ Future<xrpc.Blob?> _uploadLinkPreviewThumbnail(
     return null;
   }
 
-  final uploaded = await bluesky.atproto.repo.uploadBlob(image.bodyBytes);
+  final uploaded =
+      await bluesky.atproto.repo.uploadBlob(bytes: image.bodyBytes);
 
   return uploaded.data.blob;
 }
@@ -271,7 +298,7 @@ Future<Uint8List> _readFile(
   return file.readAsBytes();
 }
 
-Future<bsky.Post> _findPost(
+Future<bsky.PostView> _findPost(
   final bsky.Bluesky bluesky,
   final String uri,
 ) async {

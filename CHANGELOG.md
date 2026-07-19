@@ -2,7 +2,7 @@
 
 ## v6
 
-- Upgraded to `bluesky` `0.18.x` (requires Dart SDK `>= 3.3.0`).
+- Upgraded to `bluesky` `2.1.x` (requires Dart SDK `>= 3.3.0`).
 - Added `video` and `video-alt` inputs to attach a single video.
 - `media` and `media-alt` now accept **CSV format** to attach up to 4 images.
 - Added `reply-to` input to reply to a post by AT-URI (thread root resolved automatically).
