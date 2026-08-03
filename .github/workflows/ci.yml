@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reproduces exactly what the runner does when a workflow uses this
+      # action, which is where the dart pub get resolution failure surfaced.
+      - name: Build the action image
+        run: docker build -t bluesky-post:ci .
+
+      # Run the AOT-compiled binary with no inputs. It is expected to fail,
+      # but it has to fail from its own error handling, which proves the
+      # entrypoint actually starts inside the scratch image.
+      - name: Smoke test the entrypoint
+        run: |
+          output=$(docker run --rm bluesky-post:ci 2>&1 || true)
+          echo "$output"
+          if ! echo "$output" | grep -q 'Failed to create the Bluesky post'; then
+            echo "::error::The entrypoint did not start as expected."
+            exit 1
+          fi
