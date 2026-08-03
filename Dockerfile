@@ -1,5 +1,5 @@
-# Pin the Dart SDK version for reproducible builds (requires SDK >= 3.3.0).
-FROM dart:3.6 AS build
+# Pin the Dart SDK version for reproducible builds (requires SDK >= 3.8.0).
+FROM dart:3.12 AS build
 
 # Resolve app dependencies.
 WORKDIR /app
