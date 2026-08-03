@@ -1,8 +1,12 @@
 # Release Note
 
+## v6.0.1
+
+- Fixed the Docker build failure that made `v6` unusable. The base image is now `dart:3.12`; `bluesky` `2.x` and `bluesky_text` `1.x` require Dart SDK `>= 3.8.0`, which the previously pinned `dart:3.6` image could not satisfy. ([#4](https://github.com/myConsciousness/bluesky-post/issues/4))
+
 ## v6
 
-- Upgraded to `bluesky` `2.1.x` (requires Dart SDK `>= 3.3.0`).
+- Upgraded to `bluesky` `2.1.x` (requires Dart SDK `>= 3.8.0`).
 - Added `video` and `video-alt` inputs to attach a single video.
 - `media` and `media-alt` now accept **CSV format** to attach up to 4 images.
 - Added `reply-to` input to reply to a post by AT-URI (thread root resolved automatically).
